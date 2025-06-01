@@ -1,168 +1,68 @@
-import os
-import copy
+# unlearn.py
+
 import torch
-import json
-from update import LocalUpdate
-from models import MLP, CNNMnist, CNNFashion_Mnist, CNNCifar, ResNet
-from utils import get_dataset, average_weights
-from options import args_parser
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Subset
+import copy
+import numpy as np
+from torch.utils.data import Dataset
 
 
-class FedUnlearning:
-    def __init__(self, args, logger, file_manager):
-        self.args = args
-        self.logger = logger
-        self.file_manager = file_manager
-        self.device = 'cuda' if args.gpu and torch.cuda.is_available() else 'cpu'
+# -------------------- UNGAN Generator 학습 --------------------
+def train_generator_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
+                          lambda_adv=1.0, z_dim=100, batch_size=64, epochs=10):
+    """
+    단순 adversarial loss 기반 UNGAN Generator 학습 (KL 제거)
+    """
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
 
-        # 데이터셋과 유저 그룹 로드
-        self.train_dataset, self.test_dataset, self.user_groups = get_dataset(args)
+    print(f"[UNGAN] Training Generator (adversarial only) for {epochs} epochs...")
 
-        # 모델 초기화
-        self.global_model = self._select_model()
-        self._load_saved_model()
+    generator.train()
+    for epoch in range(epochs):
+        for _ in range(len(forget_idxs) // batch_size):
+            z = torch.randn((batch_size, z_dim), device=device)
+            gen_imgs = generator(z)
 
-    def _select_model(self):
-        if self.args.model == 'cnn':
-            if self.args.dataset == 'mnist':
-                return CNNMnist(args=self.args).to(self.device)
-            # elif self.args.dataset == 'fmnist':
-            #     return CNNFashion_Mnist(args=self.args).to(self.device)
-            elif self.args.dataset == 'cifar':
-                return CNNCifar(args=self.args).to(self.device)
-        elif self.args.model == 'mlp':
-            input_dim = torch.prod(torch.tensor(self.train_dataset[0][0].shape)).item()
-            return MLP(dim_in=input_dim, dim_hidden=64, dim_out=self.args.num_classes).to(self.device)
-        elif self.args.model == 'resnet':
-            return ResNet(args=self.args).to(self.device)
-        else:
-            raise ValueError(f"Invalid model type: {self.args.model}")
+            # Adversarial loss: log(D(G(z))) → G가 D를 속이도록 유도
+            d_preds = discriminator(gen_imgs)
+            adv_loss = -torch.mean(torch.log(d_preds + 1e-8))
 
-    def _load_saved_model(self):
-        if self.args.load_model and os.path.exists(self.args.load_model):
-            print(f"Loading model from {self.args.load_model}")
-            self.global_model.load_state_dict(torch.load(self.args.load_model, map_location=self.device))
-        else:
-            raise FileNotFoundError(f"No model found at {self.args.load_model}")
+            g_optimizer.zero_grad()
+            adv_loss.backward()
+            g_optimizer.step()
 
-    def unlearn_user(self, target_user):
-        print(f">>> Unlearning for user: {target_user}")
-
-        remaining_users = [u for u in range(self.args.num_users) if u != target_user]
-        local_weights, local_losses = [], []
-
-        # 1 라운드만 진행
-        print(f'\n | Unlearning Training Round : 1 |')
-
-        for user in remaining_users:
-            print(f'   |- Local Update from user {user}')
-            local_model = LocalUpdate(
-                args=self.args,
-                dataset=self.train_dataset,
-                idxs=self.user_groups[user],
-                logger=self.logger,
-                override_ep=self.args.unlearn_epochs,
-                override_lr=self.args.unlearn_lr,
-                override_momentum=self.args.unlearn_momentum
-            )
-            w, loss = local_model.update_weights(model=copy.deepcopy(self.global_model), global_round=0)
-            print(f'      ↪ Loss: {loss:.4f}')
-            local_weights.append(copy.deepcopy(w))
-            local_losses.append(loss)
-
-        # 평균 후 모델 적용
-        updated_global_weights = average_weights(local_weights)
-        self.global_model.load_state_dict(updated_global_weights)
-
-        avg_loss = sum(local_losses) / len(local_losses)
-        print(f'\nAvg Unlearning Stats after 1 round:')
-        print(f'Unlearning Loss: {avg_loss:.4f}')
-        print(">>> Unlearning complete.")
+    print("[UNGAN] Generator training completed.\n")
+    return generator
 
 
 
-    def evaluate(self, return_result=False):
-        test_loader = torch.utils.data.DataLoader(self.test_dataset, batch_size=128, shuffle=False)
-        self.global_model.eval()
-        criterion = torch.nn.CrossEntropyLoss()
+# -------------------- Synthetic Dataset 정의 --------------------
+class SyntheticImageDataset(Dataset):
+    def __init__(self, images, labels):
+        self.images = images
+        self.labels = labels
 
-        total_loss = 0
-        correct = 0
-        total = 0
+    def __len__(self):
+        return len(self.images)
 
-        backdoor_correct = 0
-        backdoor_total = 0
-
-        with torch.no_grad():
-            for images, labels in test_loader:
-                images, labels = images.to(self.device), labels.to(self.device)
-
-                outputs = self.global_model(images)
-                loss = criterion(outputs, labels).item()
-
-                total_loss += loss * labels.size(0)
-                total += labels.size(0)
-                correct += (outputs.argmax(1) == labels).sum().item()
-
-                # Backdoor trigger: 좌상단 픽셀 하얗게
-                for i in range(len(images)):
-                    images[i][:, 0, 0] = 1.0
-                backdoor_outputs = self.global_model(images)
-                backdoor_preds = backdoor_outputs.argmax(1)
-                backdoor_correct += (backdoor_preds == 0).sum().item()
-                backdoor_total += labels.size(0)
-
-        acc = correct / total
-        loss = total_loss / total
-        asr = backdoor_correct / backdoor_total
-
-        print(f"Test Accuracy after unlearning: {acc*100:.2f}%, Loss: {loss:.4f}, ASR: {asr*100:.2f}%")
-        print(f"Backdoor ASR: {asr*100:.2f}%")
-
-        if return_result:
-            return acc, loss, asr
+    def __getitem__(self, idx):
+        return self.images[idx], self.labels[idx]
 
 
-    def save_unlearned_model(self, path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(self.global_model.state_dict(), path)
-        print(f"Unlearned model saved to {path}")
+# -------------------- IID 분배 --------------------
+def partition_synthetic_data_iid(dataset, num_users):
+    num_items = int(len(dataset) / num_users)
+    indices = np.random.permutation(len(dataset))
+    user_groups = {}
 
-def save_unlearning_log(output_path, user_id, acc, loss, args):
-        log = {
-           "target_user": user_id,
-            "test_accuracy": round(acc * 100, 2),
-            "test_loss": round(loss, 4),
-            "unlearn_epochs": args.unlearn_epochs,
-            "unlearn_lr": args.unlearn_lr,
-            "unlearn_momentum": args.unlearn_momentum
-    }
+    for i in range(num_users):
+        user_groups[i] = indices[i * num_items:(i + 1) * num_items].tolist()
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, 'w') as f:
-            json.dump(log, f, indent=4)
-        print(f"Unlearning log saved to {output_path}")
+    return user_groups
 
 
-if __name__ == '__main__':
-    args = args_parser()
-    args.load_model = 'code/saved_models/pre-trained/model.pth'
-    args.save_model = 'code/saved_models/unlearn/unlearned_model.pth'
-
-    logger = None
-    file_manager = None
-
-    fed_unlearner = FedUnlearning(args, logger, file_manager)
-
-    # 1. Unlearning 실행
-    fed_unlearner.unlearn_user(target_user=args.target_user)
-
-    # 2. 평가 결과 반환
-    acc, loss, asr = fed_unlearner.evaluate(return_result=True)
-
-    # 3. 로그 저장
-    log_path = 'logs/unlearning_result.json'
-    save_unlearning_log(log_path, args.target_user, acc, loss, args)
-
-    # 4. 모델 저장
-    fed_unlearner.save_unlearned_model(args.save_model)
+# -------------------- Subset 추출 --------------------
+def get_synthetic_subset(dataset, user_groups, user_idx):
+    return Subset(dataset, user_groups[user_idx])
