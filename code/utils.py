@@ -4,6 +4,50 @@ import numpy as np
 from torchvision import datasets, transforms
 from torch.utils.data import Dataset, Subset
 
+from torch.utils.data import random_split #안 본 데이터 만들기.
+#----백도어----
+from torch.utils.data import Dataset
+import random
+
+class CustomDataset(Dataset):
+    def __init__(self, data):
+        """
+        data: list of (image_tensor, label) tuples
+        """
+        self.data = data
+        self.targets = torch.tensor([label for _, label in data])  # targets 속성 추가
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    
+def add_backdoor_trigger(x):
+    x_bd = x.clone()
+    # 채널이 1개일 때, 이미지 마지막 부분에 2x2 크기의 밝은 점 추가
+    x_bd[:, 25:28, 25:28] = 0.9
+    return x_bd
+
+
+def create_poisoned_dataset(train_dataset, user_groups, args, malicious_client=0, target_label=6, poison_ratio=0.1):
+    # 1. 악성 클라이언트 인덱스 중 일부만 백도어로 선택
+    malicious_idxs = user_groups[malicious_client]
+    num_poison = int(len(malicious_idxs) * poison_ratio)
+    poisoned_idxs = set(random.sample(malicious_idxs, num_poison))  # 순서 상관없음, lookup 빠름
+
+    full_data = []
+
+    for i in range(len(train_dataset)):
+        x, y = train_dataset[i]
+        if i in poisoned_idxs:
+            x = add_backdoor_trigger(x)
+            y = target_label
+        full_data.append((x, y))
+
+    full_dataset = CustomDataset(full_data)
+    return full_dataset, user_groups
 
 # -------------------- 데이터셋 로딩 --------------------
 def get_dataset(args):
@@ -14,6 +58,7 @@ def get_dataset(args):
         ])
         train_dataset = datasets.MNIST('./data/mnist', train=True, download=True, transform=transform)
         test_dataset = datasets.MNIST('./data/mnist', train=False, download=True, transform=transform)
+        train_dataset, unseen_dataset = random_split(train_dataset, [55000, 5000])
 
     elif args.dataset == 'cifar':
         transform = transforms.Compose([
@@ -28,7 +73,7 @@ def get_dataset(args):
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     user_groups = partition_data(train_dataset, args)
-    return train_dataset, test_dataset, user_groups
+    return train_dataset, test_dataset,unseen_dataset, user_groups
 
 
 # -------------------- 데이터셋 분할 --------------------

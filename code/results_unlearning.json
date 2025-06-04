@@ -1,0 +1,7 @@
+{
+    "test_acc_before": 0.9918,
+    "test_loss_before": 0.03269255522895746,
+    "test_acc_after": 0.9902,
+    "test_loss_after": 0.03551408462919558,
+    "mia_auc": 0.7373498181818182
+}

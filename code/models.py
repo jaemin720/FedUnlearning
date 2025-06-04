@@ -11,6 +11,8 @@ def generate_images(generator, idxs, dataset, device='cpu', z_dim=100):
     noise = torch.randn((num_samples, z_dim), device=device)
     with torch.no_grad():
         gen_imgs = generator(noise)
+        #gen_imgs = (gen_imgs + 1) / 2
+        #gen_imgs = (gen_imgs - 0.1307) / 0.3081
     labels = torch.tensor([dataset[i][1] for i in idxs], dtype=torch.long)
     return gen_imgs, labels
 
@@ -133,4 +135,3 @@ class Discriminator(nn.Module):
         out = self.model(img)
         out = out.view(out.size(0), -1)
         return self.adv_layer(out)
-

@@ -5,13 +5,13 @@ def args_parser():
     parser = argparse.ArgumentParser()
 
     # 기본 파라미터
-    parser.add_argument('--epochs', type=int, default=10, help="Number of global training rounds")
+    parser.add_argument('--epochs', type=int, default=64, help="Number of global training rounds")
     parser.add_argument('--num_users', type=int, default=10, help="Number of users/clients")
-    parser.add_argument('--frac', type=float, default=0.5, help="Fraction of clients used per round")
-    parser.add_argument('--local_ep', type=int, default=5, help="Local epochs")
-    parser.add_argument('--local_bs', type=int, default=32, help="Local batch size")
+    parser.add_argument('--frac', type=float, default=1.0, help="Fraction of clients used per round")
+    parser.add_argument('--local_ep', type=int, default=16, help="Local epochs")
+    parser.add_argument('--local_bs', type=int, default=64, help="Local batch size")
     parser.add_argument('--lr', type=float, default=0.01, help="Learning rate")
-    parser.add_argument('--momentum', type=float, default=0.5, help="SGD momentum")
+    parser.add_argument('--momentum', type=float, default=0.75, help="SGD momentum")
 
     # 데이터셋 및 모델 선택
     parser.add_argument('--dataset', type=str, default='mnist', choices=['mnist', 'fmnist', 'cifar'], help='Dataset name')
@@ -38,4 +38,4 @@ def args_parser():
     args = parser.parse_args()
     args.gpu = args.gpu >= 0
 
-    return args
+    return args 

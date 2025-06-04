@@ -22,10 +22,13 @@ def get_confidences(model, dataset, idxs, device):
     return confidences
 
 
-def evaluate_mia(model, dataset, forget_idxs, retain_idxs, shadow_idxs, device, save_path=None):
+def evaluate_mia(model, dataset,test_dataset, forget_idxs, retain_idxs, shadow_idxs, device, save_path=None):
     # 1. shadow 모델 훈련용 confidence 수집
     conf_retain = get_confidences(model, dataset, shadow_idxs, device)
     conf_forget = get_confidences(model, dataset, forget_idxs, device)
+
+    print("retain confidence mean:", np.mean(conf_retain))
+    print("forget confidence mean:", np.mean(conf_forget))
 
     X_shadow = np.array(conf_retain + conf_forget).reshape(-1, 1)
     y_shadow = np.array([0] * len(conf_retain) + [1] * len(conf_forget))
@@ -35,8 +38,10 @@ def evaluate_mia(model, dataset, forget_idxs, retain_idxs, shadow_idxs, device, 
     clf.fit(X_shadow, y_shadow)
 
     # 3. 평가 대상 confidence 수집
-    eval_conf_retain = get_confidences(model, dataset, retain_idxs, device)
+    eval_conf_retain = get_confidences(model, test_dataset, retain_idxs, device)
     eval_conf_forget = get_confidences(model, dataset, forget_idxs, device)
+    print("evalu retain confidence mean:", np.mean(eval_conf_retain))
+    print("evalu forget confidence mean:", np.mean(eval_conf_forget))
 
     X_eval = np.array(eval_conf_retain + eval_conf_forget).reshape(-1, 1)
     y_eval = np.array([0] * len(eval_conf_retain) + [1] * len(eval_conf_forget))
