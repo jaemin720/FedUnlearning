@@ -1,6 +1,7 @@
 # unlearn.py
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 import copy
@@ -35,6 +36,72 @@ def train_generator_ungan(generator, discriminator, dataset, retain_idxs, forget
 
     print("[UNGAN] Generator training completed.\n")
     return generator
+
+def train_gd_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
+                          lambda_adv=1.0, z_dim=100, batch_size=64, epochs=10):
+    """
+    UNGAN Generator & Discriminators 동시 학습 (adversarial loss 포함)
+    """
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
+    criterion = nn.BCELoss()  # Binary cross entropy loss (GAN에서 주로 사용)
+
+    # Forget 데이터셋의 실제 이미지들을 위한 DataLoader 준비
+    forget_subset = torch.utils.data.Subset(dataset, forget_idxs)
+    forget_loader = torch.utils.data.DataLoader(forget_subset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    print(f"[UNGAN] Training Generator and Discriminator for {epochs} epochs...")
+
+    generator.train()
+    discriminator.train()
+
+    for epoch in range(epochs):
+        for real_imgs, _ in forget_loader:
+            real_imgs = real_imgs.to(device)
+
+            # ---------------------
+            # 1. Discriminator 학습
+            # ---------------------
+            d_optimizer.zero_grad()
+
+            # 진짜 이미지에 대해 1로 레이블 지정
+            real_labels = torch.ones((real_imgs.size(0), 1), device=device)
+            # 가짜 이미지에 대해 0으로 레이블 지정
+            fake_labels = torch.zeros((real_imgs.size(0), 1), device=device)
+
+            # Discriminator가 진짜 이미지에 대해 잘 맞추도록
+            real_preds = discriminator(real_imgs)
+            d_loss_real = criterion(real_preds, real_labels)
+
+            # 가짜 이미지 생성
+            z = torch.randn((real_imgs.size(0), z_dim), device=device)
+            fake_imgs = generator(z)
+
+            # Discriminator가 가짜 이미지에 대해 잘 맞추도록
+            fake_preds = discriminator(fake_imgs.detach())  # detach로 G의 그래프 분리
+            d_loss_fake = criterion(fake_preds, fake_labels)
+
+            # Discriminator 전체 손실 및 역전파
+            d_loss = d_loss_real + d_loss_fake
+            d_loss.backward()
+            d_optimizer.step()
+
+            # ---------------------
+            # 2. Generator 학습
+            # ---------------------
+            g_optimizer.zero_grad()
+
+            # Generator는 Discriminator를 속여야 하므로 진짜(1) 레이블로 학습
+            fake_preds = discriminator(fake_imgs)
+            g_loss = criterion(fake_preds, real_labels)
+
+            g_loss.backward()
+            g_optimizer.step()
+
+        print(f"[UNGAN] Epoch {epoch+1}/{epochs} | D Loss: {d_loss.item():.4f} | G Loss: {g_loss.item():.4f}")
+
+    print("[UNGAN] Generator and Discriminator training completed.\n")
+    return generator, discriminator
 
 
 
