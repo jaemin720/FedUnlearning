@@ -91,6 +91,7 @@ def main():
 
     forget_client = 0
     forget_idxs = user_groups[forget_client]
+    forget_dataset = Subset(full_dataset, forget_idxs)
     retain_idxs = [i for i in range(len(train_dataset)) if i not in forget_idxs]
     test_idxs = np.random.choice(len(test_dataset), len(forget_idxs), replace=False)
 
@@ -105,7 +106,7 @@ def main():
         for idx in idxs_users:
             if epoch == args.epochs - 1 and idx == forget_client:
                 continue  # 마지막 라운드에 삭제 유저 제외
-
+            
             local_model = LocalUpdate(args=args, dataset=full_dataset, idxs=user_groups[idx])
             w, loss = local_model.update_weights(model=copy.deepcopy(global_model), global_round=epoch)
             local_weights.append(copy.deepcopy(w))
@@ -144,6 +145,9 @@ def main():
     target_label = 6  # 공격 대상 라벨 (main() 함수와 맞춰야 함)
     asr = evaluate_backdoor_asr(global_model, test_dataset, target_label, device)
     print(f"Backdoor Attack Success Rate (ASR): {asr*100:.2f}%")
+
+    acc_forget, _ = test_inference(args, global_model, forget_dataset)
+    print(f"[Forget Set Accuracy after Unlearning] {acc_forget:.4f}")
 
     torch.save(global_model.state_dict(), args.save_model)
     print(f"[Saved] model to {args.save_model}\n")
@@ -225,6 +229,10 @@ def main():
     print(f"[MIA] AUC: {mia_result['auc']:.4f}")
     asr = evaluate_backdoor_asr(global_model, test_dataset, target_label, device)
     print(f"Backdoor Attack Success Rate (ASR): {asr*100:.2f}%")
+
+    # =============== Forget Accuracy =======================
+    acc_forget, _ = test_inference(args, global_model, forget_dataset)
+    print(f"[Forget Set Accuracy after Unlearning] {acc_forget:.4f}")
 
     # ===================== 7. 결과 저장 =====================
     result_json = {
