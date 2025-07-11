@@ -14,7 +14,7 @@ def generate_images(generator, idxs, dataset, device='cpu', z_dim=100):
         #gen_imgs = (gen_imgs + 1) / 2
         #gen_imgs = (gen_imgs - 0.1307) / 0.3081
     labels = torch.tensor([dataset[i][1] for i in idxs], dtype=torch.long)
-    return gen_imgs, labels
+    return gen_imgs.cpu(), labels.cpu()
 
 
 # ---------- 이미지 필터링 ----------
