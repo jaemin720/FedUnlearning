@@ -5,10 +5,10 @@ def args_parser():
     parser = argparse.ArgumentParser()
 
     # 기본 파라미터
-    parser.add_argument('--epochs', type=int, default=64, help="Number of global training rounds")
+    parser.add_argument('--epochs', type=int, default=200, help="Number of global training rounds")
     parser.add_argument('--num_users', type=int, default=10, help="Number of users/clients")
     parser.add_argument('--frac', type=float, default=1.0, help="Fraction of clients used per round")
-    parser.add_argument('--local_ep', type=int, default=16, help="Local epochs")
+    parser.add_argument('--local_ep', type=int, default=10, help="Local epochs")
     parser.add_argument('--local_bs', type=int, default=64, help="Local batch size")
     parser.add_argument('--lr', type=float, default=0.01, help="Learning rate")
     parser.add_argument('--momentum', type=float, default=0.75, help="SGD momentum")
@@ -25,7 +25,7 @@ def args_parser():
     # 모델 학습 결과 저장 및 로드
     parser.add_argument('--load_model', type=str, default=None,
                     help="Path to a saved model to resume training from")
-    parser.add_argument('--save_model', type=str, default='./saved_models/model.pth',
+    parser.add_argument('--save_model', type=str, default='./saved_models/model200.pth',
                     help="Path to save the trained model")
 
         # Generator 관련 파라미터 (필요 시)
