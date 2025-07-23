@@ -23,7 +23,7 @@ class LocalUpdate:
     def update_weights(self, model, global_round):
         model.to(self.device)
         model.train()
-        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum)
+        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum,weight_decay=1e-4)
 
         epoch_loss = []
 
@@ -46,7 +46,7 @@ class LocalUpdate:
     def FedErase_update_weights(self, model, global_round):
         model.to(self.device)
         model.train()
-        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum)
+        optimizer = optim.SGD(model.parameters(), lr=self.args.lr, momentum=self.args.momentum,weight_decay=1e-4)
         original_weights = copy.deepcopy(model.state_dict())
         epoch_loss = []
 
@@ -71,7 +71,8 @@ class LocalUpdate:
         for key in updated_weights.keys():
             delta_weights[key] = updated_weights[key] - original_weights[key]
 
-        return model.state_dict(), sum(epoch_loss) / len(epoch_loss)
+        # 반환: 모델 파라미터와 로컬 손실, 델타 파라미터
+        return updated_weights, sum(epoch_loss) / len(epoch_loss), delta_weights
 
 
     def inference(self, model):
