@@ -18,14 +18,14 @@ def args_parser():
     parser.add_argument('--model', type=str, default='cnn', choices=['cnn', 'mlp', 'resnet'], help='Model architecture')
 
     # 기타 옵션
-    parser.add_argument('--iid', type=int, default=1, help="IID or Non-IID data distribution (1 for IID, 0 for Non-IID)")
+    parser.add_argument('--iid', type=int, default=0, help="IID or Non-IID data distribution (1 for IID, 0 for Non-IID)")
     parser.add_argument('--gpu', type=int, default=0, help="GPU ID, set to -1 for CPU")
     parser.add_argument('--num_classes', type=int, default=10, help="Number of output classes")
 
     # 모델 학습 결과 저장 및 로드
     parser.add_argument('--load_model', type=str, default=None,
                     help="Path to a saved model to resume training from")
-    parser.add_argument('--save_model', type=str, default='./saved_models/model200.pth',
+    parser.add_argument('--save_model', type=str, default='./saved_models/noniid_cnn_mnist_model100.pth',
                     help="Path to save the trained model")
 
         # Generator 관련 파라미터 (필요 시)
