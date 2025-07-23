@@ -61,32 +61,56 @@ def get_dataset(args):
         train_dataset, unseen_dataset = random_split(train_dataset, [55000, 5000])
 
     elif args.dataset == 'cifar':
-        transform = transforms.Compose([
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465),
                                  (0.2023, 0.1994, 0.2010))
         ])
-        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=transform)
-        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=transform)
 
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                 (0.2023, 0.1994, 0.2010))
+        ])
+        train_dataset = datasets.CIFAR10('./data/cifar', train=True, download=True, transform=train_transform)
+        test_dataset = datasets.CIFAR10('./data/cifar', train=False, download=True, transform=test_transform)
+        train_dataset, unseen_dataset = random_split(train_dataset, [45000, 5000]) #50,000개의 학습데이터, 10,000개의 검증 데이터
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     user_groups = partition_data(train_dataset, args)
     return train_dataset, test_dataset,unseen_dataset, user_groups
 
+def get_targets_from_dataset(dataset):
+    # 일반 Dataset이면 .targets 바로 반환
+    if hasattr(dataset, 'targets'):
+        targets = dataset.targets
+    # Subset일 경우, 원본 데이터셋과 인덱스를 통해 targets 뽑기
+    elif isinstance(dataset, torch.utils.data.Subset):
+        targets = np.array(dataset.dataset.targets)[dataset.indices]
+    else:
+        raise AttributeError("Dataset type not supported for getting targets")
+    
+    # Tensor라면 numpy 변환 (필요시 .cpu()도)
+    if isinstance(targets, torch.Tensor):
+        targets = targets.cpu().numpy()
+    return targets
 
 # -------------------- 데이터셋 분할 --------------------
 def partition_data(dataset, args):
-    num_items = int(len(dataset) / args.num_users)
+    num_items = len(dataset) // args.num_users
     user_groups = {}
 
+    labels = get_targets_from_dataset(dataset)
+    
     if args.iid:
+        np.random.seed(42) # 고정
         idxs = np.random.permutation(len(dataset))
         for i in range(args.num_users):
             user_groups[i] = idxs[i * num_items:(i + 1) * num_items].tolist()
     else:
-        labels = dataset.targets.numpy()
         idxs = np.argsort(labels)
         shards_per_user = 2
         num_shards = args.num_users * shards_per_user
@@ -100,6 +124,7 @@ def partition_data(dataset, args):
                 user_groups[i] += shard.tolist()
 
     return user_groups
+
 
 
 # -------------------- 가중치 평균 --------------------
@@ -129,16 +154,36 @@ def exp_details(args):
 
 
 # -------------------- Synthetic Dataset 클래스 --------------------
+def get_transform(dataset_name):
+    if dataset_name == 'mnist':
+        return transforms.Normalize((0.1307,), (0.3081,))
+    elif dataset_name == 'cifar':
+        return transforms.Normalize((0.4914, 0.4822, 0.4465),
+                                    (0.2023, 0.1994, 0.2010))
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+
 class SyntheticImageDataset(Dataset):
-    def __init__(self, images, labels):
+    def __init__(self, images, labels, transform=None, device=None):
         self.images = images
         self.labels = labels
+        self.transform = transform
+        self.device = device
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        return self.images[idx], self.labels[idx]
+        img, label = self.images[idx], self.labels[idx]
+        if self.transform:
+            img = self.transform(img)
+        if self.device:
+            img = img.to(self.device)
+            if isinstance(label, torch.Tensor):
+                label = label.to(self.device)
+        return img, label
+
+
 
 
 # -------------------- Synthetic 데이터 IID 분배 --------------------
