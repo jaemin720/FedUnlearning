@@ -12,22 +12,22 @@ from torch.utils.data import TensorDataset
 
 from options import args_parser
 from update import LocalUpdate, test_inference
-from models import CNNMnist, Generator, Discriminator, generate_images, filter_images
-from utils import get_dataset, average_weights, exp_details, create_poisoned_dataset
+from models import CNNMnist, Generator, Discriminator, generate_images, filter_images, select_model
+from utils import get_dataset, average_weights, exp_details, create_poisoned_dataset, get_transform, SyntheticImageDataset
 from unlearn import (
     train_generator_ungan,
-    SyntheticImageDataset,
     partition_synthetic_data_iid,
     get_synthetic_subset
 )
 from evaluate_mia import evaluate_mia
+
 
 def move_dataset_to_device(dataset, device):
     images = []
     labels = []
     for x, y in dataset:
         images.append(x.to(device))
-        labels.append(torch.tensor(y).to(device))
+        labels.append(y.to(device) if isinstance(y, torch.Tensor) else torch.tensor(y).to(device))
     return TensorDataset(torch.stack(images), torch.stack(labels))
 
 
@@ -57,15 +57,8 @@ def evaluate_backdoor_asr(model, dataset, target_label, device):
     asr = correct / total
     return asr
 
-def select_model(args, train_dataset):
-    if args.model == 'cnn':
-        return CNNMnist(args=args)
-    else:
-        raise NotImplementedError
-
 
 def main():
-    
     args = args_parser()
     device = 'cuda' if args.gpu and torch.cuda.is_available() else 'cpu'
 
@@ -78,13 +71,23 @@ def main():
     full_dataset, user_groups = create_poisoned_dataset(train_dataset, user_groups, args,
                                                         malicious_client=0,
                                                         target_label=6,
-                                                        poison_ratio=0.8)
+                                                        poison_ratio=0.3)
 
     global_model = select_model(args, full_dataset).to(device)
     global_model.train()
 
-    generator = Generator(z_dim=args.z_dim).to(device)
-    discriminator = Discriminator().to(device)
+    if args.dataset == 'mnist':
+        img_shape = (1, 28, 28)
+    elif args.dataset == 'cifar':
+        img_shape = (3, 32, 32)
+    else:
+        raise ValueError("Unsupported dataset")
+
+    generator = Generator(z_dim=args.z_dim, img_shape=img_shape).to(device)
+    discriminator = Discriminator(img_shape=img_shape).to(device)
+
+    #generator = Generator(z_dim=args.z_dim).to(device)
+    #discriminator = Discriminator().to(device)
 
     global_weights = global_model.state_dict()
     train_loss, train_accuracy = [], []
@@ -169,23 +172,24 @@ def main():
         lambda_adv=0.1,
         z_dim=args.z_dim,
         batch_size=64,
-        epochs=10
+        epochs=1
     )
-
 
     # ===================== 4. Generator 이미지 생성 및 필터링 =====================
     # Generator 이미지 생성 및 필터링
     print("[Unlearning] Generating and filtering synthetic data...")
-    synthetic_imgs, synthetic_labels = generate_images(generator, forget_idxs, full_dataset, device=device, z_dim=args.z_dim)
-    filtered_imgs, filtered_labels = filter_images(discriminator, synthetic_imgs, synthetic_labels, threshold=args.gen_threshold, device=device)
-                                              
-
-    if len(filtered_imgs) < args.num_users:
-        print(f"[Unlearning] Filtered images insufficient ({len(filtered_imgs)}) for unlearning. Skipping.")
-        return
-
-    synthetic_dataset = SyntheticImageDataset(filtered_imgs, filtered_labels)
     unseen_dataset = move_dataset_to_device(unseen_dataset, device)
+    synthetic_imgs, synthetic_labels = generate_images(generator, forget_idxs, full_dataset, device=device, z_dim=args.z_dim)
+    #filtered_imgs, filtered_labels = filter_images(discriminator, synthetic_imgs, synthetic_labels, threshold=args.gen_threshold, device=device)       
+
+    #if len(filtered_imgs) < args.num_users:
+    #    print(f"[Unlearning] Filtered images insufficient ({len(filtered_imgs)}) for unlearning. Skipping.")
+    #    return
+
+    #synthetic_dataset = SyntheticImageDataset(filtered_imgs, filtered_labels)
+    syn_transform = get_transform(args.dataset)
+    #synthetic_labels = torch.tensor(synthetic_labels)
+    synthetic_dataset = SyntheticImageDataset(synthetic_imgs, synthetic_labels, transform=syn_transform, device=device)
 
     combined_dataset = ConcatDataset([synthetic_dataset, unseen_dataset])
     #syn_user_groups = partition_synthetic_data_iid(synthetic_dataset, args.num_users)
