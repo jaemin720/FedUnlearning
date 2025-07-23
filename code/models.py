@@ -2,18 +2,36 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import torchvision.transforms as transforms
+from torchvision.models import resnet18
 
+def select_model(args, train_dataset):
+    if args.model == 'cnn':
+        return CNNMnist(args=args)
+    elif args.model == 'resnet' : # CIFAR-10에 맞추져 있음.
+        model = resnet18(pretrained=False)
+        # 1. 첫 번째 conv layer를 수정
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        # 2. maxpool 제거 (CIFAR에선 필요 없음)
+        model.maxpool = nn.Identity()
+        # 3. 마지막 FC층을 CIFAR 클래스 수에 맞게 수정
+        model.fc = nn.Linear(model.fc.in_features, 10)
+        return model
+    else:
+        raise NotImplementedError
+    
 # ---------- 이미지 생성 ----------
-def generate_images(generator, idxs, dataset, device='cpu', z_dim=100):
+def generate_images(generator, idxs, dataset, device='cpu', z_dim=100, num_generate=None):#num_generate가 개수
     generator.eval()
     device = torch.device(device)
-    num_samples = len(idxs)
+    if num_generate is None:
+        num_samples = len(idxs)
+    else:
+        num_samples = num_generate
     noise = torch.randn((num_samples, z_dim), device=device)
     with torch.no_grad():
         gen_imgs = generator(noise)
-        #gen_imgs = (gen_imgs + 1) / 2
-        #gen_imgs = (gen_imgs - 0.1307) / 0.3081
-    labels = torch.tensor([dataset[i][1] for i in idxs], dtype=torch.long)
+    labels = torch.tensor([dataset[i][1] for i in idxs[:num_samples]], dtype=torch.long)
     return gen_imgs.cpu(), labels.cpu()
 
 
