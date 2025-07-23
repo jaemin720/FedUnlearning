@@ -103,6 +103,86 @@ def train_gd_ungan(generator, discriminator, dataset, retain_idxs, forget_idxs, 
     print("[UNGAN] Generator and Discriminator training completed.\n")
     return generator, discriminator
 
+def train_gd_ungan_with_unseen(generator, discriminator, dataset, retain_idxs, forget_idxs, device,
+                   lambda_adv, z_dim, batch_size, epochs, unseen_dataset=None):
+    """
+    UNGAN Generator & Discriminator 학습
+    → Discriminator는 Unseen+Forget 데이터를 모두 Real로 학습
+    → Generator는 adversarial loss + (optional) unseen similarity loss 사용
+    """
+    g_optimizer = torch.optim.Adam(generator.parameters(), lr=1e-4)
+    d_optimizer = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
+    criterion = nn.BCELoss()  # GAN용 이진 분류 손실
+
+    # Forget + Unseen 데이터 로더 구성
+    forget_subset = torch.utils.data.Subset(dataset, forget_idxs)
+
+    if unseen_dataset is not None:
+        real_dataset = torch.utils.data.ConcatDataset([forget_subset, unseen_dataset])
+    else:
+        real_dataset = forget_subset
+
+    real_loader = torch.utils.data.DataLoader(real_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    print(f"[UNGAN] Training Generator and Discriminator for {epochs} epochs...")
+
+    generator.train()
+    discriminator.train()
+    if unseen_dataset is not None:
+        unseen_loader = torch.utils.data.DataLoader(unseen_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+        unseen_iter = iter(unseen_loader)
+    for epoch in range(epochs):
+        for real_imgs, _ in real_loader:
+            real_imgs = real_imgs.to(device)
+
+            # ---------------------
+            # 1. Discriminator 학습
+            # ---------------------
+            d_optimizer.zero_grad()
+
+            real_labels = torch.ones((real_imgs.size(0), 1), device=device)
+            fake_labels = torch.zeros((real_imgs.size(0), 1), device=device)
+
+            real_preds = discriminator(real_imgs)
+            d_loss_real = criterion(real_preds, real_labels)
+
+            z = torch.randn((real_imgs.size(0), z_dim), device=device)
+            fake_imgs = generator(z)
+
+            fake_preds = discriminator(fake_imgs.detach())
+            d_loss_fake = criterion(fake_preds, fake_labels)
+
+            d_loss = d_loss_real + d_loss_fake
+            d_loss.backward()
+            d_optimizer.step()
+
+            # ---------------------
+            # 2. Generator 학습
+            # ---------------------
+            g_optimizer.zero_grad()
+            fake_preds = discriminator(fake_imgs)
+            g_loss_adv = criterion(fake_preds, real_labels)
+
+            sim_loss = 0.0
+            if unseen_dataset is not None:
+                try:
+                    unseen_imgs, _ = next(unseen_iter)
+                except StopIteration:
+                    unseen_iter = iter(unseen_loader)
+                    unseen_imgs, _ = next(unseen_iter)
+
+                unseen_imgs = unseen_imgs.to(device)
+                min_len = min(fake_imgs.size(0), unseen_imgs.size(0))
+                sim_loss = F.mse_loss(fake_imgs[:min_len], unseen_imgs[:min_len])
+
+            g_loss = g_loss_adv + lambda_adv * sim_loss
+            g_loss.backward()
+            g_optimizer.step()
+
+        print(f"[UNGAN] Epoch {epoch+1}/{epochs} | D Loss: {d_loss.item():.4f} | G Loss: {g_loss.item():.4f} | Sim Loss: {sim_loss:.4f}")
+
+    print("[UNGAN] Generator and Discriminator training completed.\n")
+    return generator, discriminator
 
 
 # -------------------- Synthetic Dataset 정의 --------------------
